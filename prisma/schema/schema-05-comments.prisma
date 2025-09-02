@@ -1,0 +1,193 @@
+/// Primary business entity representing user-authored comments on posts.
+/// Each comment may be a direct reply to a post (parent_id null) or a reply
+/// to another comment (parent_id set), enabling recursive threading.
+/// Comments are linked to posts (community_platform_posts), authored by a
+/// member (community_platform_members), and support independent search,
+/// edit, and moderation. Snapshots track version history (see {@link
+/// community_platform_comment_snapshots}). Reports reference this entity for
+/// abuse/moderation. Cascade deletion from posts and parent comments must be
+/// enforced on application side.
+///
+/// @namespace Comments
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_comments {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Belonged post's {@link community_platform_posts.id}.
+  post_id String @db.Uuid
+  
+  /// Comment author's {@link community_platform_members.id}.
+  author_id String @db.Uuid
+  
+  /// Parent comment's {@link community_platform_comments.id}. Nullable for
+  /// top-level comments.
+  parent_id String? @db.Uuid
+  
+  /// Comment text content (plain text, 2-2000 chars, no code/scripts).
+  content String
+  
+  /// Whether the comment has been edited after initial creation.
+  edited Boolean
+  
+  /// Net vote score (upvotes minus downvotes); live recalculated, not stored
+  /// (for reference only). Business tables must not persist live scores.
+  score Int? @db.Integer
+  
+  /// Timestamp of comment creation (UTC).
+  created_at DateTime @db.Timestamptz
+  
+  /// Timestamp of last modification (UTC).
+  updated_at DateTime @db.Timestamptz
+  
+  /// Null unless soft-deleted (when present, comment is considered deleted for
+  /// user-facing UIs).
+  deleted_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  post community_platform_posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  author community_platform_members @relation(fields: [author_id], references: [id], onDelete: Cascade)
+  parent community_platform_comments? @relation("recursive", fields: [parent_id], references: [id], onDelete: Cascade)
+  
+  recursive community_platform_comments[] @relation("recursive")
+  community_platform_comment_snapshots community_platform_comment_snapshots[]
+  community_platform_comment_reports community_platform_comment_reports[]
+  community_platform_votes community_platform_votes[]
+  community_platform_vote_snapshots community_platform_vote_snapshots[]
+  community_platform_search_views community_platform_search_views[]
+  
+  @@unique([post_id, id])
+  @@unique([parent_id, id])
+  @@index([post_id, parent_id])
+  @@index([author_id, created_at])
+  @@index([created_at])
+  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Snapshot entity for immutable, historical records of state changes to
+/// comments. Each snapshot preserves the full state of a comment at a moment
+/// in time for audit, rollback, version control, or moderation. Linked to
+/// original comment, capturing author, parent, post, content, edit state,
+/// and timestamps. Append-only; no updates or deletions permitted. Utilized
+/// for audit trails, abuse investigations, and trust/safety reporting.
+/// Related to {@link community_platform_comments}.
+///
+/// @namespace Comments
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_comment_snapshots {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Original comment's {@link community_platform_comments.id}.
+  comment_id String @db.Uuid
+  
+  /// Referenced post's {@link community_platform_posts.id} (captured at the
+  /// time of snapshot for historical linkage).
+  post_id String @db.Uuid
+  
+  /// Comment author's {@link community_platform_members.id} (historical copy;
+  /// author may change roles).
+  author_id String @db.Uuid
+  
+  /// Parent comment snapshot's {@link
+  /// community_platform_comment_snapshots.id}. Nullable for top-level
+  /// snapshot.
+  parent_id String? @db.Uuid
+  
+  /// Full content of comment at snapshot time (plain text, up to 2000 chars).
+  content String
+  
+  /// Whether this version reflects an edit after original creation.
+  edited Boolean
+  
+  /// Explanation/reason for this snapshot (e.g., initial, edit, moderation
+  /// action, abuse report, etc.).
+  snapshot_reason String
+  
+  /// Timestamp when this snapshot was saved (UTC).
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  comment community_platform_comments @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  post community_platform_posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  author community_platform_members @relation(fields: [author_id], references: [id], onDelete: Cascade)
+  parent community_platform_comment_snapshots? @relation("recursive", fields: [parent_id], references: [id], onDelete: Cascade)
+  
+  recursive community_platform_comment_snapshots[] @relation("recursive")
+  
+  @@index([author_id])
+  @@index([parent_id])
+  
+  @@unique([comment_id, created_at])
+  @@index([post_id])
+  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Primary business entity for user-initiated reports of inappropriate
+/// comments. Contains references to the reported comment, the reporting user
+/// (member), and includes reason, status, resolution, and timestamps for
+/// moderation workflows. Used for actionable moderation flows, supporting
+/// search across reports by status, reporter, and referenced comment. All
+/// reports are reviewed by admins.
+///
+/// @namespace Comments
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_comment_reports {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Reported comment's {@link community_platform_comments.id}.
+  comment_id String @db.Uuid
+  
+  /// Reporting member's {@link community_platform_members.id}.
+  reporter_id String @db.Uuid
+  
+  /// Assigned admin's {@link community_platform_admins.id} if report has been
+  /// escalated/assigned. Nullable until assigned.
+  admin_id String? @db.Uuid
+  
+  /// Reporter-supplied reason/description for the report (plain text, 2-500
+  /// chars).
+  report_reason String
+  
+  /// Status of the report (e.g., pending, under_review, resolved, rejected).
+  status String
+  
+  /// Resolution note or outcome determined by moderator/admin.
+  resolution String?
+  
+  /// Timestamp report was created (UTC).
+  created_at DateTime @db.Timestamptz
+  
+  /// Timestamp of last modification (UTC), e.g., status or resolution changed.
+  updated_at DateTime @db.Timestamptz
+  
+  /// Timestamp when report was resolved/closed. Nullable if still open.
+  resolved_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  comment community_platform_comments @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  reporter community_platform_members @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
+  admin community_platform_admins? @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  
+  @@unique([comment_id, reporter_id])
+  @@index([status])
+  @@index([reporter_id, created_at])
+  @@index([admin_id])
+  @@index([report_reason(ops: raw("gin_trgm_ops"))], type: Gin)
+}

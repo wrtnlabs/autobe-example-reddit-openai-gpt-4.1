@@ -1,0 +1,142 @@
+/// Master table for community category definitions. This model stores the
+/// allowed set of categories that a sub-community can belong to, such as
+/// 'Tech & Programming', 'Science', etc. Each community must reference a
+/// valid category from this table. Enables system-wide normalization of
+/// category selection and allows for category auditing, restriction, and
+/// business reporting. Frequently referenced by {@link
+/// community_platform_communities}.
+///
+/// @namespace Systematic
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_categories {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Unique string code for the category (typically slug form, e.g.,
+  /// 'tech_programming'). Used for programmatic references and API lookups.
+  /// Must be unique.
+  code String
+  
+  /// Human-readable display name for the category (e.g., 'Tech &
+  /// Programming'). Required for display in UI and selection lists.
+  name String
+  
+  /// Optional long-form category description (up to 200 characters), for
+  /// tooltips or additional UI context.
+  description String?
+  
+  /// Timestamp when the category was created.
+  created_at DateTime @db.Timestamptz
+  
+  /// Timestamp when the category was last updated.
+  updated_at DateTime @db.Timestamptz
+  
+  /// Timestamp marking soft deletion of the category. Null if active. Provides
+  /// audit support for category lifecycle.
+  deleted_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  community_platform_communities community_platform_communities[]
+  
+  @@unique([code])
+  @@unique([name])
+  @@index([created_at])
+}
+
+/// System-wide banned words list for content moderation. Each row represents
+/// a single word or phrase that is not permitted in posts, comments,
+/// community names, and other user-generated content. Enables robust
+/// moderation by providing a centrally managed, independently updatable
+/// dictionary outside of main content flows. List is referenced by
+/// moderation engines and can be maintained by trusted moderators/admins.
+///
+/// @namespace Systematic
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_banned_words {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Banned word or phrase. Used for case-insensitive content validation and
+  /// moderation sweeps. Must be unique across list.
+  phrase String
+  
+  /// Optional category or severity flag for this phrase (e.g.,
+  /// 'profanity','spam','hate'). Enables fine-grained filtering and reporting.
+  category String?
+  
+  /// Indicates whether the banned word/phrase is currently active and
+  /// enforced. Allows for temporary deactivation without deletion.
+  enabled Boolean
+  
+  /// Timestamp when this banned word/phrase was added to the list.
+  created_at DateTime @db.Timestamptz
+  
+  /// Timestamp when the phrase was last modified (e.g., edit or re-enabled).
+  updated_at DateTime @db.Timestamptz
+  
+  /// Timestamp marking soft deletion/removal from enforcement. Null if still
+  /// active. Supports audit trails for moderation history.
+  deleted_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([phrase])
+  @@index([enabled])
+  @@index([category])
+}
+
+/// Centralized storage for system-level configuration parameters and
+/// business logic switches (e.g., toggling maintenance mode, updating UI
+/// settings, adjusting moderation thresholds). This table allows flexible
+/// addition of named configuration entries by administrators, supporting
+/// runtime system adjustments without code deploys. Accessible and
+/// independently managed by trusted admins. May be referenced throughout
+/// business logic for behavioral branching.
+///
+/// @namespace Systematic
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_configurations {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Unique string key representing the configuration parameter (e.g.,
+  /// 'maintenance_mode', 'max_post_length'). All config lookups are based on
+  /// this key. Must be unique.
+  key String
+  
+  /// The raw configuration value (typically serialized as text, which may be
+  /// JSON, number, string, or feature flag). Must be interpreted at the
+  /// business logic layer per config key type.
+  value String
+  
+  /// Description of the configuration setting for admin UI/reference.
+  description String?
+  
+  /// Timestamp when this configuration was created.
+  created_at DateTime @db.Timestamptz
+  
+  /// Timestamp when the configuration was last updated.
+  updated_at DateTime @db.Timestamptz
+  
+  /// Timestamp marking soft deletion/lifecycle end of the configuration. Null
+  /// if active. Enables auditability for config changes.
+  deleted_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([key])
+  @@index([created_at])
+}

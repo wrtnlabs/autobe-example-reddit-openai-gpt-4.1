@@ -1,0 +1,114 @@
+/// Records each user's vote (upvote, downvote, or neutral) on either a post
+/// or a comment. Each vote is uniquely defined per user and target (post or
+/// comment); a user cannot vote more than once on a single post or comment,
+/// and cannot vote on their own content (enforced in business logic, not in
+/// schema). Either post or comment foreign key must be set (mutually
+/// exclusive, never both). Deleting a target (post/comment) or voter
+/// (member) cascades to delete votes. This model enables independent
+/// creation, update, and removal of votes, supports audit and rollback via
+/// snapshots ({@link community_platform_vote_snapshots}).
+///
+/// @namespace Votes
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_votes {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// User (member) who cast the vote. {@link community_platform_members.id}.
+  voter_id String @db.Uuid
+  
+  /// Target post voted on (if this is a post vote). {@link
+  /// community_platform_posts.id}. Only one of post_id or comment_id is set
+  /// per vote. Null means not a post vote.
+  post_id String? @db.Uuid
+  
+  /// Target comment voted on (if this is a comment vote). {@link
+  /// community_platform_comments.id}. Only one of post_id or comment_id is set
+  /// per vote. Null means not a comment vote.
+  comment_id String? @db.Uuid
+  
+  /// Vote value: 1 for upvote, -1 for downvote, 0 for neutral (vote removal).
+  /// Only these values are valid. Enforced in application logic.
+  value Int @db.Integer
+  
+  /// Vote creation timestamp.
+  created_at DateTime @db.Timestamptz
+  
+  /// Vote modification timestamp.
+  updated_at DateTime @db.Timestamptz
+  
+  /// Vote soft-deletion timestamp. Null if not deleted; set if vote was
+  /// removed/deleted (soft delete).
+  deleted_at DateTime? @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  voter community_platform_members @relation(fields: [voter_id], references: [id], onDelete: Cascade)
+  post community_platform_posts? @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  comment community_platform_comments? @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  
+  community_platform_vote_snapshots community_platform_vote_snapshots[]
+  
+  @@unique([voter_id, post_id])
+  @@unique([voter_id, comment_id])
+  @@index([post_id])
+  @@index([comment_id])
+  @@index([voter_id])
+}
+
+/// Captures point-in-time historical states of individual votes for audit,
+/// dispute, and rollback. Each record logs a single change event or version
+/// for a vote (including on creation, modification, or deletion). Used for
+/// compliance, recovery, and detailed audit trails. Each snapshot references
+/// the vote it records and includes all original vote fields for complete
+/// historical context.
+///
+/// @namespace Votes
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_vote_snapshots {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id @db.Uuid
+  
+  /// Original vote tracked by this snapshot. {@link
+  /// community_platform_votes.id}.
+  vote_id String @db.Uuid
+  
+  /// User (member) who cast the original vote. Redundant from main votes table
+  /// for audit integrity. {@link community_platform_members.id}.
+  voter_id String @db.Uuid
+  
+  /// Target post (if the vote was for a post). Duplicates from vote; used for
+  /// full snapshot context. {@link community_platform_posts.id}.
+  post_id String? @db.Uuid
+  
+  /// Target comment (if the vote was for a comment). Duplicates from vote;
+  /// used for full snapshot context. {@link community_platform_comments.id}.
+  comment_id String? @db.Uuid
+  
+  /// Vote value at the time of the snapshot: 1 for upvote, -1 for downvote, 0
+  /// for neutral/removal.
+  value Int @db.Integer
+  
+  /// Snapshot creation timestamp.
+  created_at DateTime @db.Timestamptz
+  
+  //----
+  // RELATIONS
+  //----
+  vote community_platform_votes @relation(fields: [vote_id], references: [id], onDelete: Cascade)
+  voter community_platform_members @relation(fields: [voter_id], references: [id], onDelete: Cascade)
+  post community_platform_posts? @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  comment community_platform_comments? @relation(fields: [comment_id], references: [id], onDelete: Cascade)
+  
+  @@index([vote_id])
+  @@index([voter_id])
+  @@index([post_id])
+  @@index([comment_id])
+}
