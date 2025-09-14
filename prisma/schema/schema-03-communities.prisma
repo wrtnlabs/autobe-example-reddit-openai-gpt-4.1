@@ -1,12 +1,12 @@
-/// Main sub-community entity. Represents each named, top-level discussion
-/// group (sub-community) on the platform. Contains immutable name (unique,
-/// alphanumeric, hyphen/underscore), category (FK), owner/creator (FK),
-/// description, logo/banner URIs, created_at/updated_at timestamps, and
-/// optional community-wide rules. Supports unique name constraint and
-/// category covariates. Directly managed (create/read/update/delete) by
-/// users and admins. Referenced by memberships, rules, and posts. {@link
-/// community_platform_community_memberships}, {@link
-/// community_platform_community_rules}.
+/// Table representing sub-communities within the platform. Each row stores
+/// metadata and configuration for a single community: unique name, category
+/// reference, description, visual assets (logo/banner), and rules (via
+/// subsidiary table). The owner is an immutable reference to the user who
+/// created the community. Only owners may update metadata except for
+/// deletion, which may be performed by admin. Business constraints enforce
+/// unique and valid names. Categories are referenced from
+/// community_platform_categories. Supports full-text search on name and
+/// description via GIN indexes. Deletion is soft (deleted_at).
 ///
 /// @namespace Communities
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
@@ -15,68 +15,61 @@ model community_platform_communities {
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Category reference. {@link community_platform_categories.id}.
-  category_id String @db.Uuid
+  /// Creator of the community. References {@link
+  /// community_platform_memberusers.id}.
+  owner_id String
   
-  /// Owner/creator reference. {@link community_platform_members.id}.
-  owner_id String @db.Uuid
+  /// Category for this community. References {@link
+  /// community_platform_categories.id}.
+  category_id String
   
-  /// Immutable, unique, human-readable community name. 3-32 characters,
-  /// alphanumeric, hyphen, underscore. Uniqueness enforced case-insensitively.
-  /// Not editable after creation.
+  /// Unique, case-insensitive name of the community (5-32 chars, a-zA-Z0-9-_).
+  /// Immutable once set. Used as public identifier.
   name String
   
-  /// Optional display title of the community. Up to 64 characters. Editable by
-  /// owner or admin.
-  display_title String?
-  
-  /// Optional summary description for the community, up to 200 characters.
+  /// Optional community description, up to 200 characters.
   description String?
   
-  /// Optional URI for the community's logo image. Max 5MB.
-  logo_uri String? @db.VarChar(80000)
+  /// Optional URI for community logo/image asset.
+  logo_uri String?
   
-  /// Optional URI for the community's banner image. Max 5MB.
-  banner_uri String? @db.VarChar(80000)
+  /// Optional URI for community banner image asset.
+  banner_uri String?
   
-  /// Timestamp: when the community was created.
-  created_at DateTime @db.Timestamptz
+  /// Timestamp this community was created.
+  created_at DateTime
   
-  /// Timestamp: when the community was last updated.
-  updated_at DateTime @db.Timestamptz
+  /// Timestamp of the most recent metadata update.
+  updated_at DateTime
   
-  /// Timestamp: when the community was soft-deleted, else null.
-  deleted_at DateTime? @db.Timestamptz
+  /// Timestamp marking soft deletion, or null if active.
+  deleted_at DateTime?
   
   //----
   // RELATIONS
   //----
+  owner community_platform_memberusers @relation(fields: [owner_id], references: [id], onDelete: Cascade)
   category community_platform_categories @relation(fields: [category_id], references: [id], onDelete: Cascade)
-  owner community_platform_members @relation(fields: [owner_id], references: [id], onDelete: Cascade)
   
   community_platform_community_memberships community_platform_community_memberships[]
-  community_platform_recent_communities community_platform_recent_communities[]
   community_platform_community_rules community_platform_community_rules[]
+  community_platform_recent_communities community_platform_recent_communities[]
   community_platform_posts community_platform_posts[]
-  community_platform_search_views community_platform_search_views[]
   
   @@unique([name])
+  @@index([owner_id, created_at])
   @@index([category_id])
-  @@index([owner_id])
-  @@index([display_title(ops: raw("gin_trgm_ops"))], type: Gin)
-  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([created_at])
 }
 
-/// Junction table tracking many-to-many membership between users and
-/// communities. Records each join event. Used to determine who has joined
-/// which community for personalized feeds, permissions, and UI state. Does
-/// not contain historic membership (no history retention on leave).
-/// Existence of a row means current active membership. Composite unique
-/// constraint ensures user can join a community only once. Members and
-/// communities are both referenced. {@link community_platform_members.id},
-/// {@link community_platform_communities.id}.
+/// Table representing the many-to-many relationship between users and
+/// communities. Each record marks the fact that a user is a joined member of
+/// a given community. Used for membership enforcement, home feed
+/// personalization, and recent communities logic. Entries may be created or
+/// removed by users directly. Uniqueness enforced on (user, community).
+/// Supports joined time and auditing.
 ///
 /// @namespace Communities
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
@@ -85,75 +78,35 @@ model community_platform_community_memberships {
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Member reference (user who joins). {@link community_platform_members.id}.
-  member_id String @db.Uuid
+  /// Joined community reference. {@link community_platform_communities.id}.
+  community_id String
   
-  /// Community being joined. {@link community_platform_communities.id}.
-  community_id String @db.Uuid
+  /// User that joined this community. {@link
+  /// community_platform_memberusers.id}.
+  memberuser_id String
   
-  /// Timestamp when member joined community. Joining is always explicit user
-  /// action; no implicit or historic membership tracking.
-  joined_at DateTime @db.Timestamptz
-  
-  //----
-  // RELATIONS
-  //----
-  member community_platform_members @relation(fields: [member_id], references: [id], onDelete: Cascade)
-  community community_platform_communities @relation(fields: [community_id], references: [id], onDelete: Cascade)
-  
-  @@unique([member_id, community_id], map: "community_platform_community_memberships_member_id_com_70068f2b")
-  @@index([community_id])
-  @@index([member_id])
-}
-
-/// Tracks the recency of each member's interaction with communities (e.g.,
-/// for sidebar 'recent communities' UI). Serves as a many-to-many support
-/// junction, records most recent visit or activity to a community by each
-/// member. Not a full audit trail, nor a membership log. Ensures for each
-/// (member, community) the most recent row is retained. Managed for UI
-/// purposes, not historical record. Composite member/community unique index.
-/// {@link community_platform_members.id}, {@link
-/// community_platform_communities.id}.
-///
-/// @namespace Communities
-/// @author AutoBE - https://github.com/wrtnlabs/autobe
-model community_platform_recent_communities {
-  //----
-  // COLUMNS
-  //----
-  /// Primary Key.
-  id String @id @db.Uuid
-  
-  /// Member reference. {@link community_platform_members.id}.
-  member_id String @db.Uuid
-  
-  /// Community reference. {@link community_platform_communities.id}.
-  community_id String @db.Uuid
-  
-  /// Timestamp when this member last visited/engaged with this community.
-  /// Updated on every user interaction that should update recency UI state.
-  touched_at DateTime @db.Timestamptz
+  /// Timestamp when user joined this community.
+  joined_at DateTime
   
   //----
   // RELATIONS
   //----
-  member community_platform_members @relation(fields: [member_id], references: [id], onDelete: Cascade)
   community community_platform_communities @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  memberUser community_platform_memberusers @relation(fields: [memberuser_id], references: [id], onDelete: Cascade)
   
-  @@unique([member_id, community_id], map: "community_platform_recent_communities_member_id_commun_bb0c614e")
-  @@index([touched_at])
-  @@index([member_id])
+  @@unique([community_id, memberuser_id], map: "community_platform_community_memberships_community_id__843c6db7")
+  @@index([memberuser_id, joined_at], map: "community_platform_community_memberships_memberuser_id_20f16d26")
   @@index([community_id])
 }
 
-/// Stores each community's optional multi-line rules (up to 10 lines, each
-/// up to 50 characters). Exists only in context of a parent community. Each
-/// row is a single rule line, foreign-keyed to community. Editable by
-/// community owner and admins only. Managed together with the parent
-/// community and not independently. Enforces 3NF and flexible rule
-/// management. {@link community_platform_communities.id}.
+/// Stores the set of numbered rules for each community, used for
+/// informational and business constraint display. Each rule is a text string
+/// up to business limit; rules are always associated with a particular
+/// community. Managed only through community settings flows, not directly by
+/// end users. Deleting a community cascades deletion of its rules. Ordering
+/// is enforced per-community with rule_index.
 ///
 /// @namespace Communities
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
@@ -162,18 +115,19 @@ model community_platform_community_rules {
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Community to which this rule belongs. {@link
-  /// community_platform_communities.id}.
-  community_id String @db.Uuid
+  /// Parent community for this rule. {@link community_platform_communities.id}.
+  community_id String
   
-  /// Order of rule line (0-based, must be between 0–9; max 10 rules per
-  /// community enforced at app level).
-  rule_index Int @db.Integer
+  /// Order of this rule in display (starts at 1, max 10 per community).
+  rule_index Int
   
-  /// Single rule line (max 50 characters, no linebreaks).
-  rule_line String
+  /// Content for the community rule (max 100 characters).
+  rule_text String
+  
+  /// Timestamp rule was added.
+  created_at DateTime
   
   //----
   // RELATIONS
@@ -182,5 +136,48 @@ model community_platform_community_rules {
   
   @@unique([community_id, rule_index])
   @@index([community_id])
-  @@index([rule_line(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Records the recent community navigation/activity for a member user, to
+/// power personalized sidebars and navigation. Each entry links a user and a
+/// community, with a recency ordering (recent_rank) and last_activity_at
+/// timestamp. Not a membership table—distinct from
+/// platform_community_memberships. Used for fast access/recall UI, managed
+/// automatically by system logic. Max 5 recent communities per user enforced
+/// via unique index.
+///
+/// @namespace Communities
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_recent_communities {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// User who recently navigated to a community. {@link
+  /// community_platform_memberusers.id}.
+  memberuser_id String
+  
+  /// Recently visited community. {@link community_platform_communities.id}.
+  community_id String
+  
+  /// Rank/order of this community in recent navigation for this user (lower =
+  /// more recent, max 5 per user).
+  recent_rank Int
+  
+  /// Timestamp this community was last visited by user.
+  last_activity_at DateTime
+  
+  //----
+  // RELATIONS
+  //----
+  memberUser community_platform_memberusers @relation(fields: [memberuser_id], references: [id], onDelete: Cascade)
+  community community_platform_communities @relation(fields: [community_id], references: [id], onDelete: Cascade)
+  
+  @@index([community_id])
+  
+  @@unique([memberuser_id, recent_rank], map: "community_platform_recent_communities_memberuser_id_re_fd697867")
+  @@unique([memberuser_id, community_id], map: "community_platform_recent_communities_memberuser_id_co_2c64c9d9")
+  @@index([memberuser_id])
 }

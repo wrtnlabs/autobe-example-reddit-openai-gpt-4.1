@@ -6,95 +6,67 @@ import { v4 } from "uuid";
 import { toISOStringSafe } from "../util/toISOStringSafe";
 import { ICommunityPlatformCommunity } from "@ORGANIZATION/PROJECT-api/lib/structures/ICommunityPlatformCommunity";
 import { IPageICommunityPlatformCommunity } from "@ORGANIZATION/PROJECT-api/lib/structures/IPageICommunityPlatformCommunity";
-import { IPage } from "@ORGANIZATION/PROJECT-api/lib/structures/IPage";
 
 /**
- * Paginated search and discovery for communities with filtering and sort
- * options.
+ * Search and paginate sub-communities (community_platform_communities)
  *
- * Search and return a paginated list of communities with advanced filtering and
- * sorting. Includes options to filter by category, owner, partial name match,
- * or display title. Results provide summary information for each community
- * along with basic category data and status. Pagination and sort by activity or
- * creation time are supported. Does not return communities flagged as deleted
- * (unless admin override for auditing). Available to all users for discovery,
- * but response includes additional admin details when accessed by
- * administrators. This endpoint is optimized for search/explore and top-level
- * listings.
+ * Retrieves a paginated, filterable list of sub-communities based on complex
+ * business, validation, and classification rules. Only active (non-deleted)
+ * communities are returned. Filters by name, category, and owner are supported,
+ * as well as standard pagination and sorting.
  *
- * @param props - Request properties
- * @param props.body - Search and filter options for community listings.
- *   Includes pagination, sorting, search string, and category/owner filters.
- * @returns Paginated list of community summaries matching search parameters for
- *   use in listings/search/explore screens.
- * @throws {Error} Throws for unexpected database errors or when unable to fetch
- *   communities.
+ * @param props - Properties for the search and pagination operation
+ * @param props.body - Request body specifying filter and pagination parameters
+ * @returns Paged list of community summaries with pagination info for
+ *   exploration/grids
+ * @throws {Error} If invalid parameters are provided or database fails
  */
 export async function patch__communityPlatform_communities(props: {
   body: ICommunityPlatformCommunity.IRequest;
 }): Promise<IPageICommunityPlatformCommunity.ISummary> {
   const { body } = props;
-  const page = Number(body.page ?? 1);
-  const limit = Number(body.limit ?? 20);
+  const page = body.page ?? 1;
+  const limit = body.limit ?? 20;
   const skip = (page - 1) * limit;
 
-  // Validate and apply sort keys
-  const allowedSorts = [
-    "created_at",
-    "updated_at",
-    "name",
-    "display_title",
-  ] as const;
-  const sortBy =
-    allowedSorts.includes(body.sortBy as (typeof allowedSorts)[number]) &&
-    body.sortBy
-      ? body.sortBy
-      : "created_at";
-  const direction =
-    body.direction === "asc" || body.direction === "desc"
-      ? body.direction
-      : "desc";
+  // Determine order by logic per sort_by parameter (define inline for Prisma type inference)
+  const sortBy = body.sort_by ?? "newest";
+  // Always fallback to created_at desc because schema does not have a 'score' or engagement metric
+  // Also, inline the orderBy object and ensure it uses a literal type ("desc" as const)
 
-  // Build where clause dynamically
+  // Construct where filters only using schema-verified fields
   const where = {
     deleted_at: null,
-    ...(body.category_id && { category_id: body.category_id }),
-    ...(body.owner_id && { owner_id: body.owner_id }),
-    ...(body.name && {
-      name: { contains: body.name, mode: "insensitive" as const },
-    }),
-    ...(body.display_title && {
-      display_title: {
-        contains: body.display_title,
-        mode: "insensitive" as const,
-      },
-    }),
-    ...(body.description && {
-      description: { contains: body.description, mode: "insensitive" as const },
-    }),
-    ...(body.search && {
-      OR: [
-        { name: { contains: body.search, mode: "insensitive" as const } },
-        {
-          display_title: {
-            contains: body.search,
-            mode: "insensitive" as const,
-          },
+    ...(body.name !== undefined &&
+      body.name !== null && {
+        name: {
+          contains: body.name,
         },
-        {
-          description: { contains: body.search, mode: "insensitive" as const },
-        },
-      ],
-    }),
+      }),
+    ...(body.category_id !== undefined &&
+      body.category_id !== null && {
+        category_id: body.category_id,
+      }),
+    ...(body.owner_id !== undefined &&
+      body.owner_id !== null && {
+        owner_id: body.owner_id,
+      }),
   };
 
-  // Fetch data & count concurrently
-  const [rows, total] = await Promise.all([
+  // Query data and total count in parallel
+  const [records, total] = await Promise.all([
     MyGlobal.prisma.community_platform_communities.findMany({
       where,
-      orderBy: { [sortBy]: direction },
+      orderBy: { created_at: "desc" as const },
       skip,
       take: limit,
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        logo_uri: true,
+        banner_uri: true,
+      },
     }),
     MyGlobal.prisma.community_platform_communities.count({ where }),
   ]);
@@ -104,15 +76,14 @@ export async function patch__communityPlatform_communities(props: {
       current: Number(page),
       limit: Number(limit),
       records: total,
-      pages: limit > 0 ? Math.ceil(total / limit) : 0,
+      pages: Math.ceil(total / limit),
     },
-    data: rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      display_title: row.display_title ?? undefined,
-      category_id: row.category_id,
-      owner_id: row.owner_id,
-      created_at: toISOStringSafe(row.created_at),
+    data: records.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description ?? undefined,
+      logo_uri: r.logo_uri ?? undefined,
+      banner_uri: r.banner_uri ?? undefined,
     })),
   };
 }

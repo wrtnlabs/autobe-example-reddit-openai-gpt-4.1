@@ -1,11 +1,11 @@
-/// Stores all posts (threads) created by authenticated members within
-/// communities. Each post belongs to a sub-community and has an author
-/// (member), supports edits (versioned via post_snapshots), and is
-/// referenced by comments, votes, and reports. Core entity enabling
-/// personalized feeds, search, and moderation. Snapshots preserve edit
-/// history. Deletion cascades to comments and votes. Foreign keys link to
-/// {@link community_platform_communities}, {@link
-/// community_platform_members}.
+/// Posts table storing all primary content items (threads, questions, etc.).
+/// Contains title and body, references to community and author, and temporal
+/// fields for auditing. Supports soft delete for business rule compliance.
+/// Each post must reference a valid community and author (either member or
+/// admin). Used for feed queries, full-text search, and direct management by
+/// users. Related entities include {@link community_platform_communities}
+/// for the containing group and {@link community_platform_memberusers} or
+/// {@link community_platform_adminusers} for authorship.
 ///
 /// @namespace Posts
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
@@ -14,171 +14,156 @@ model community_platform_posts {
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Belonged community's {@link community_platform_communities.id}. Each post
-  /// is always tied to a specific community.
-  community_platform_community_id String @db.Uuid
+  /// Belonged community's {@link community_platform_communities.id}. Required
+  /// for enforcing post ownership to a specific community.
+  community_platform_community_id String
   
-  /// Author member's {@link community_platform_members.id}. References the
-  /// creator/author of the post.
-  community_platform_member_id String @db.Uuid
+  /// Authored member user's {@link community_platform_memberusers.id}. Exactly
+  /// one of author_memberuser_id or author_adminuser_id must be set. Used when
+  /// the post author is a regular member user.
+  author_memberuser_id String?
   
-  /// Post title. Must be 5–120 chars, plain text. Used for search/discovery.
+  /// Authored admin user's {@link community_platform_adminusers.id}. Exactly
+  /// one of author_memberuser_id or author_adminuser_id must be set. Used when
+  /// the post author is an admin user.
+  author_adminuser_id String?
+  
+  /// Post title. Must be between 5 and 120 characters as enforced by business
+  /// rules.
   title String
   
-  /// Post content body. Plain text, 10–10,000 chars. No code or scripts
-  /// allowed.
+  /// Post body content. Must be between 10 to 10,000 characters. Plain text
+  /// with only line breaks allowed.
   body String
   
-  /// Optional display name to override default. If null, use 'Anonymous' or
-  /// profile default. Up to 32 chars.
+  /// Optional author display name (0–32 chars). Displays 'Anonymous' if empty
+  /// as per system rule.
   author_display_name String?
   
-  /// Post creation timestamp.
-  created_at DateTime @db.Timestamptz
+  /// Creation timestamp of the post.
+  created_at DateTime
   
-  /// Post last edit/update timestamp.
-  updated_at DateTime @db.Timestamptz
+  /// Last updated timestamp of the post.
+  updated_at DateTime
   
-  /// Soft-deleted timestamp. Null if active. Used for soft delete.
-  deleted_at DateTime? @db.Timestamptz
+  /// Soft deletion timestamp. Null if not deleted, otherwise indicates
+  /// deletion time.
+  deleted_at DateTime?
   
   //----
   // RELATIONS
   //----
   community community_platform_communities @relation(fields: [community_platform_community_id], references: [id], onDelete: Cascade)
-  author community_platform_members @relation(fields: [community_platform_member_id], references: [id], onDelete: Cascade)
+  memberAuthor community_platform_memberusers? @relation(fields: [author_memberuser_id], references: [id], onDelete: Cascade)
+  adminAuthor community_platform_adminusers? @relation(fields: [author_adminuser_id], references: [id], onDelete: Cascade)
   
-  community_platform_post_snapshots community_platform_post_snapshots[]
-  community_platform_post_reports community_platform_post_reports[]
+  community_platform_post_votes community_platform_post_votes[]
+  community_platform_post_moderation_logs community_platform_post_moderation_logs[]
   community_platform_comments community_platform_comments[]
-  community_platform_comment_snapshots community_platform_comment_snapshots[]
-  community_platform_votes community_platform_votes[]
-  community_platform_vote_snapshots community_platform_vote_snapshots[]
-  community_platform_search_views community_platform_search_views[]
   
+  @@index([author_memberuser_id])
+  @@index([author_adminuser_id])
+  
+  @@unique([community_platform_community_id, title], map: "community_platform_posts_community_platform_community__f0743395")
+  @@index([created_at])
   @@index([community_platform_community_id, created_at], map: "community_platform_posts_community_platform_community__4df12ea5")
-  @@index([community_platform_member_id, created_at], map: "community_platform_posts_community_platform_member_id__94e4a784")
-  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
-  @@index([body(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
-/// Point-in-time snapshots for each revision of a post for audit trail,
-/// rollback, and edit/version history. Every update to a post creates an
-/// append-only record here, preserving the full prior state. Supports
-/// moderation review and compliance audits. References the post,
-/// author/member at snapshot time. Not user-editable. Foreign keys to {@link
-/// community_platform_posts}, {@link community_platform_members}.
+/// Supporting table capturing voting state (upvote, downvote, none) for each
+/// user and post. Only one row exists per user+post combination. Used for
+/// aggregator queries on score calculation for posts and enforcing
+/// one-vote-per-user logic. Foreign keys reference {@link
+/// community_platform_posts}, {@link community_platform_memberusers}, and
+/// {@link community_platform_adminusers}.
 ///
 /// @namespace Posts
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
-model community_platform_post_snapshots {
+model community_platform_post_votes {
   //----
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Original post's {@link community_platform_posts.id}.
-  community_platform_post_id String @db.Uuid
+  /// Related post's {@link community_platform_posts.id}.
+  community_platform_post_id String
   
-  /// Author member's {@link community_platform_members.id}. The member
-  /// associated with this snapshot (may match original author or modifier).
-  community_platform_member_id String @db.Uuid
+  /// Voting member user's {@link community_platform_memberusers.id}. One of
+  /// voter_memberuser_id or voter_adminuser_id must be set.
+  voter_memberuser_id String?
   
-  /// Snapshot of the post's title at this version.
-  title String
+  /// Voting admin user's {@link community_platform_adminusers.id}. One of
+  /// voter_memberuser_id or voter_adminuser_id must be set.
+  voter_adminuser_id String?
   
-  /// Snapshot of the post's body at this version.
-  body String
+  /// Vote state for post by user: 'upvote', 'downvote', or 'none'. Only one
+  /// allowed per post per user. Null indicates an explicit removal (optional
+  /// for soft deleted votes).
+  vote_state String
   
-  /// Snapshot of display name (may be null for anonymous/default in that
-  /// version).
-  author_display_name String?
+  /// Vote creation timestamp.
+  created_at DateTime
   
-  /// Snapshot creation (edit) time. Immutable.
-  created_at DateTime @db.Timestamptz
-  
-  //----
-  // RELATIONS
-  //----
-  post community_platform_posts @relation(fields: [community_platform_post_id], references: [id], onDelete: Cascade, map: "community_platform_post_snapshots_community_platform_p_40e2b12f")
-  member community_platform_members @relation(fields: [community_platform_member_id], references: [id], onDelete: Cascade, map: "community_platform_post_snapshots_community_platform_m_ef0b8ac4")
-  
-  @@index([community_platform_member_id], map: "community_platform_post_snapshots_community_platform_m_7ae23d63")
-  
-  @@index([community_platform_post_id, created_at], map: "community_platform_post_snapshots_community_platform_p_fff76d8e")
-}
-
-/// Reports filed by members or admins for moderation actions against posts
-/// (spam, abuse, rules violation, etc). Enables workflow for review,
-/// escalation, and tracking. Each report references the target post, the
-/// reporting member, and optionally the admin handler. Includes type,
-/// reason, status, and resolution fields. Drives moderation/appeals
-/// lifecycle. Linked to {@link community_platform_posts}, {@link
-/// community_platform_members}, and {@link community_platform_admins}.
-///
-/// @namespace Posts
-/// @author AutoBE - https://github.com/wrtnlabs/autobe
-model community_platform_post_reports {
-  //----
-  // COLUMNS
-  //----
-  /// Primary Key.
-  id String @id @db.Uuid
-  
-  /// Target post's {@link community_platform_posts.id}. The post that was
-  /// reported.
-  community_platform_post_id String @db.Uuid
-  
-  /// Reporting member's {@link community_platform_members.id}. The user who
-  /// created the report.
-  reported_by_member_id String @db.Uuid
-  
-  /// Admin's {@link community_platform_admins.id} who handled or resolved this
-  /// report. Nullable until assigned.
-  admin_id String? @db.Uuid
-  
-  /// Type/category of report (e.g. spam, abuse, offtopic, moderation, other).
-  report_type String
-  
-  /// Detailed reason or user-entered explanation of report. Business rules:
-  /// plain text, up to 1000 characters. Searchable field.
-  reason String
-  
-  /// Current report status (e.g. open, resolved, dismissed). Drives moderation
-  /// queue/workflow.
-  status String
-  
-  /// Optional: notes or rationale by admin/moderator after handling. Null if
-  /// unresolved or unannotated.
-  resolution_notes String?
-  
-  /// Creation (filing) time of report.
-  created_at DateTime @db.Timestamptz
-  
-  /// Time of last update or admin action.
-  updated_at DateTime @db.Timestamptz
-  
-  /// When report was resolved or closed. Null for open cases.
-  resolved_at DateTime? @db.Timestamptz
-  
-  /// Soft-delete timestamp; record remains for audit/logs after logical
-  /// deletion.
-  deleted_at DateTime? @db.Timestamptz
+  /// Vote last updated timestamp (toggle logic).
+  updated_at DateTime
   
   //----
   // RELATIONS
   //----
   post community_platform_posts @relation(fields: [community_platform_post_id], references: [id], onDelete: Cascade)
-  reporter community_platform_members @relation(fields: [reported_by_member_id], references: [id], onDelete: Cascade)
-  admin community_platform_admins? @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+  memberVoter community_platform_memberusers? @relation(fields: [voter_memberuser_id], references: [id], onDelete: Cascade)
+  adminVoter community_platform_adminusers? @relation(fields: [voter_adminuser_id], references: [id], onDelete: Cascade)
   
-  @@index([reported_by_member_id])
-  @@index([admin_id])
+  @@index([voter_memberuser_id])
+  @@index([voter_adminuser_id])
   
-  @@index([report_type, status, created_at], map: "community_platform_post_reports_report_type_status_cre_8b7036f0")
-  @@index([community_platform_post_id, status], map: "community_platform_post_reports_community_platform_pos_def59a0e")
-  @@index([reason(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@unique([community_platform_post_id, voter_memberuser_id], map: "community_platform_post_votes_community_platform_post__d63b215a")
+  @@unique([community_platform_post_id, voter_adminuser_id], map: "community_platform_post_votes_community_platform_post__d63b6bb4")
+  @@index([community_platform_post_id])
+  @@index([created_at])
+}
+
+/// Table recording moderation actions on posts (edit, delete, restore, etc.)
+/// for legal/accountability compliance. Each event is linked to a post,
+/// performed by an admin user, and stores the action type, reason, and
+/// timestamp. Used for audit trails and recovery/business rule enforcement.
+/// Related to {@link community_platform_posts} and {@link
+/// community_platform_adminusers}.
+///
+/// @namespace Posts
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_post_moderation_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Target post's {@link community_platform_posts.id}.
+  community_platform_post_id String
+  
+  /// Admin user performing the moderation action {@link
+  /// community_platform_adminusers.id}.
+  performed_adminuser_id String
+  
+  /// Moderation action type (e.g., 'edit', 'delete', 'restore').
+  action_type String
+  
+  /// Explanation/reason provided for moderation action. Up to 255 chars.
+  action_reason String?
+  
+  /// Timestamp of the moderation event.
+  created_at DateTime
+  
+  //----
+  // RELATIONS
+  //----
+  post community_platform_posts @relation(fields: [community_platform_post_id], references: [id], onDelete: Cascade)
+  adminModerator community_platform_adminusers @relation(fields: [performed_adminuser_id], references: [id], onDelete: Cascade)
+  
+  @@index([community_platform_post_id], map: "community_platform_post_moderation_logs_community_plat_23e8a1a7")
+  @@index([performed_adminuser_id], map: "community_platform_post_moderation_logs_performed_admi_c032c320")
+  @@index([created_at])
 }

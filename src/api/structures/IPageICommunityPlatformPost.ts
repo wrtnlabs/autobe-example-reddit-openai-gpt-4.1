@@ -3,12 +3,15 @@ import { ICommunityPlatformPost } from "./ICommunityPlatformPost";
 
 export namespace IPageICommunityPlatformPost {
   /**
-   * Paginated collection of post summary objects. Returns multiple post
-   * summary records with pagination information. Used for feed/list views,
-   * provides lightweight details for each post.
+   * A page.
+   *
+   * Collection of records with pagination information.
    */
   export type ISummary = {
+    /** Page information. */
     pagination: IPage.IPagination;
+
+    /** List of records. */
     data: ICommunityPlatformPost.ISummary[];
   };
 }

@@ -3,12 +3,15 @@ import { ICommunityPlatformCommunity } from "./ICommunityPlatformCommunity";
 
 export namespace IPageICommunityPlatformCommunity {
   /**
-   * Paginated results (IPage<T>) for community summary data. Provides paging,
-   * total record counts, and an array of summary community card data. Used in
-   * home feed, explore, and search results.
+   * A page.
+   *
+   * Collection of records with pagination information.
    */
   export type ISummary = {
+    /** Page information. */
     pagination: IPage.IPagination;
+
+    /** List of records. */
     data: ICommunityPlatformCommunity.ISummary[];
   };
 }

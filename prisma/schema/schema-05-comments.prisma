@@ -1,12 +1,11 @@
-/// Primary business entity representing user-authored comments on posts.
-/// Each comment may be a direct reply to a post (parent_id null) or a reply
-/// to another comment (parent_id set), enabling recursive threading.
-/// Comments are linked to posts (community_platform_posts), authored by a
-/// member (community_platform_members), and support independent search,
-/// edit, and moderation. Snapshots track version history (see {@link
-/// community_platform_comment_snapshots}). Reports reference this entity for
-/// abuse/moderation. Cascade deletion from posts and parent comments must be
-/// enforced on application side.
+/// Represents a comment on a post in the community platform. Supports
+/// arbitrary nesting via self-reference for threaded replies
+/// (parent_comment_id). Each comment is authored by a user, and may
+/// reference either a member, guest, or admin user ID, and is always
+/// associated to a specific post. Comments can be top-level (no
+/// parent_comment_id) or replies (parent_comment_id set). Moderation and
+/// access controls are enforced at the application. All standard text and
+/// length validation is application-enforced. Deletion is soft (deleted_at).
 ///
 /// @namespace Comments
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
@@ -15,179 +14,122 @@ model community_platform_comments {
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Belonged post's {@link community_platform_posts.id}.
-  post_id String @db.Uuid
+  /// The post this comment belongs to. References {@link
+  /// community_platform_posts.id}.
+  post_id String
   
-  /// Comment author's {@link community_platform_members.id}.
-  author_id String @db.Uuid
+  /// The parent comment for nested replies. References {@link
+  /// community_platform_comments.id}. Null for top-level comments.
+  parent_comment_id String?
   
-  /// Parent comment's {@link community_platform_comments.id}. Nullable for
-  /// top-level comments.
-  parent_id String? @db.Uuid
+  /// The member user who authored this comment. References {@link
+  /// community_platform_memberusers.id}. Null unless the comment was made by a
+  /// member user.
+  author_memberuser_id String?
   
-  /// Comment text content (plain text, 2-2000 chars, no code/scripts).
-  content String
+  /// The guest user who authored this comment. References {@link
+  /// community_platform_guestusers.id}. Null unless the comment was made by a
+  /// guest user.
+  author_guestuser_id String?
   
-  /// Whether the comment has been edited after initial creation.
-  edited Boolean
+  /// The admin user who authored this comment. References {@link
+  /// community_platform_adminusers.id}. Null unless the comment was made by an
+  /// admin user.
+  author_adminuser_id String?
   
-  /// Net vote score (upvotes minus downvotes); live recalculated, not stored
-  /// (for reference only). Business tables must not persist live scores.
-  score Int? @db.Integer
+  /// The body content of the comment, plain text, 2–2,000 characters.
+  /// Validation is application-enforced.
+  body String
   
-  /// Timestamp of comment creation (UTC).
-  created_at DateTime @db.Timestamptz
+  /// Optional author display name for this comment (0–32 characters). Uses
+  /// "Anonymous" if empty per platform rules.
+  display_name String?
   
-  /// Timestamp of last modification (UTC).
-  updated_at DateTime @db.Timestamptz
+  /// Timestamp when the comment was created.
+  created_at DateTime
   
-  /// Null unless soft-deleted (when present, comment is considered deleted for
-  /// user-facing UIs).
-  deleted_at DateTime? @db.Timestamptz
+  /// Timestamp when the comment was last updated.
+  updated_at DateTime
+  
+  /// Soft delete: Timestamp when the comment was deleted, null if not deleted.
+  deleted_at DateTime?
   
   //----
   // RELATIONS
   //----
   post community_platform_posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  author community_platform_members @relation(fields: [author_id], references: [id], onDelete: Cascade)
-  parent community_platform_comments? @relation("recursive", fields: [parent_id], references: [id], onDelete: Cascade)
+  parentComment community_platform_comments? @relation("recursive", fields: [parent_comment_id], references: [id], onDelete: Cascade)
+  authorMember community_platform_memberusers? @relation(fields: [author_memberuser_id], references: [id], onDelete: Cascade)
+  authorGuest community_platform_guestusers? @relation(fields: [author_guestuser_id], references: [id], onDelete: Cascade)
+  authorAdmin community_platform_adminusers? @relation(fields: [author_adminuser_id], references: [id], onDelete: Cascade)
   
   recursive community_platform_comments[] @relation("recursive")
-  community_platform_comment_snapshots community_platform_comment_snapshots[]
-  community_platform_comment_reports community_platform_comment_reports[]
-  community_platform_votes community_platform_votes[]
-  community_platform_vote_snapshots community_platform_vote_snapshots[]
-  community_platform_search_views community_platform_search_views[]
+  community_platform_comment_votes community_platform_comment_votes[]
   
-  @@unique([post_id, id])
-  @@unique([parent_id, id])
-  @@index([post_id, parent_id])
-  @@index([author_id, created_at])
-  @@index([created_at])
-  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([post_id, created_at])
+  @@index([parent_comment_id])
+  @@index([author_memberuser_id])
+  @@index([author_guestuser_id])
+  @@index([author_adminuser_id])
 }
 
-/// Snapshot entity for immutable, historical records of state changes to
-/// comments. Each snapshot preserves the full state of a comment at a moment
-/// in time for audit, rollback, version control, or moderation. Linked to
-/// original comment, capturing author, parent, post, content, edit state,
-/// and timestamps. Append-only; no updates or deletions permitted. Utilized
-/// for audit trails, abuse investigations, and trust/safety reporting.
-/// Related to {@link community_platform_comments}.
+/// Tracks per-user vote state for each comment. Each record represents the
+/// current vote (upvote, downvote, or none) by a single user (can be member,
+/// guest, or admin) on a given comment. Maximum of one vote state per (user,
+/// comment) pair is enforced. Cannot be used to vote on own comment,
+/// enforced by application. Used to calculate comment scores.
 ///
 /// @namespace Comments
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
-model community_platform_comment_snapshots {
+model community_platform_comment_votes {
   //----
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Original comment's {@link community_platform_comments.id}.
-  comment_id String @db.Uuid
+  /// The comment this vote is associated with. References {@link
+  /// community_platform_comments.id}.
+  comment_id String
   
-  /// Referenced post's {@link community_platform_posts.id} (captured at the
-  /// time of snapshot for historical linkage).
-  post_id String @db.Uuid
+  /// The member user who cast the vote. References {@link
+  /// community_platform_memberusers.id}. Null unless vote by a member user.
+  voter_memberuser_id String?
   
-  /// Comment author's {@link community_platform_members.id} (historical copy;
-  /// author may change roles).
-  author_id String @db.Uuid
+  /// The guest user who cast the vote. References {@link
+  /// community_platform_guestusers.id}. Null unless vote by a guest user.
+  voter_guestuser_id String?
   
-  /// Parent comment snapshot's {@link
-  /// community_platform_comment_snapshots.id}. Nullable for top-level
-  /// snapshot.
-  parent_id String? @db.Uuid
+  /// The admin user who cast the vote. References {@link
+  /// community_platform_adminusers.id}. Null unless vote by an admin user.
+  voter_adminuser_id String?
   
-  /// Full content of comment at snapshot time (plain text, up to 2000 chars).
-  content String
+  /// Vote state: must be one of 'upvote', 'downvote', or 'none'. Business
+  /// logic ensures at most one vote per user/comment.
+  vote_type String
   
-  /// Whether this version reflects an edit after original creation.
-  edited Boolean
+  /// Timestamp when the vote was created.
+  created_at DateTime
   
-  /// Explanation/reason for this snapshot (e.g., initial, edit, moderation
-  /// action, abuse report, etc.).
-  snapshot_reason String
-  
-  /// Timestamp when this snapshot was saved (UTC).
-  created_at DateTime @db.Timestamptz
+  /// Timestamp when the vote was last updated.
+  updated_at DateTime
   
   //----
   // RELATIONS
   //----
   comment community_platform_comments @relation(fields: [comment_id], references: [id], onDelete: Cascade)
-  post community_platform_posts @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  author community_platform_members @relation(fields: [author_id], references: [id], onDelete: Cascade)
-  parent community_platform_comment_snapshots? @relation("recursive", fields: [parent_id], references: [id], onDelete: Cascade)
+  voterMember community_platform_memberusers? @relation(fields: [voter_memberuser_id], references: [id], onDelete: Cascade)
+  voterGuest community_platform_guestusers? @relation(fields: [voter_guestuser_id], references: [id], onDelete: Cascade)
+  voterAdmin community_platform_adminusers? @relation(fields: [voter_adminuser_id], references: [id], onDelete: Cascade)
   
-  recursive community_platform_comment_snapshots[] @relation("recursive")
+  @@index([voter_memberuser_id])
+  @@index([voter_guestuser_id])
+  @@index([voter_adminuser_id])
   
-  @@index([author_id])
-  @@index([parent_id])
-  
-  @@unique([comment_id, created_at])
-  @@index([post_id])
-  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin)
-}
-
-/// Primary business entity for user-initiated reports of inappropriate
-/// comments. Contains references to the reported comment, the reporting user
-/// (member), and includes reason, status, resolution, and timestamps for
-/// moderation workflows. Used for actionable moderation flows, supporting
-/// search across reports by status, reporter, and referenced comment. All
-/// reports are reviewed by admins.
-///
-/// @namespace Comments
-/// @author AutoBE - https://github.com/wrtnlabs/autobe
-model community_platform_comment_reports {
-  //----
-  // COLUMNS
-  //----
-  /// Primary Key.
-  id String @id @db.Uuid
-  
-  /// Reported comment's {@link community_platform_comments.id}.
-  comment_id String @db.Uuid
-  
-  /// Reporting member's {@link community_platform_members.id}.
-  reporter_id String @db.Uuid
-  
-  /// Assigned admin's {@link community_platform_admins.id} if report has been
-  /// escalated/assigned. Nullable until assigned.
-  admin_id String? @db.Uuid
-  
-  /// Reporter-supplied reason/description for the report (plain text, 2-500
-  /// chars).
-  report_reason String
-  
-  /// Status of the report (e.g., pending, under_review, resolved, rejected).
-  status String
-  
-  /// Resolution note or outcome determined by moderator/admin.
-  resolution String?
-  
-  /// Timestamp report was created (UTC).
-  created_at DateTime @db.Timestamptz
-  
-  /// Timestamp of last modification (UTC), e.g., status or resolution changed.
-  updated_at DateTime @db.Timestamptz
-  
-  /// Timestamp when report was resolved/closed. Nullable if still open.
-  resolved_at DateTime? @db.Timestamptz
-  
-  //----
-  // RELATIONS
-  //----
-  comment community_platform_comments @relation(fields: [comment_id], references: [id], onDelete: Cascade)
-  reporter community_platform_members @relation(fields: [reporter_id], references: [id], onDelete: Cascade)
-  admin community_platform_admins? @relation(fields: [admin_id], references: [id], onDelete: Cascade)
-  
-  @@unique([comment_id, reporter_id])
-  @@index([status])
-  @@index([reporter_id, created_at])
-  @@index([admin_id])
-  @@index([report_reason(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@unique([comment_id, voter_memberuser_id], map: "community_platform_comment_votes_comment_id_voter_memb_4c2dd838")
+  @@unique([comment_id, voter_guestuser_id], map: "community_platform_comment_votes_comment_id_voter_gues_c44df4d8")
+  @@unique([comment_id, voter_adminuser_id], map: "community_platform_comment_votes_comment_id_voter_admi_285fe175")
+  @@index([comment_id])
 }

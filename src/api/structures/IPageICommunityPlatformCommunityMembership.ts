@@ -3,13 +3,15 @@ import { ICommunityPlatformCommunityMembership } from "./ICommunityPlatformCommu
 
 export namespace IPageICommunityPlatformCommunityMembership {
   /**
-   * Paginated collection of community membership summary records. Used for
-   * paginated community member lists in roster UIs or moderation/member
-   * management APIs. Always contains pagination and data fields (never
-   * business properties directly).
+   * A page.
+   *
+   * Collection of records with pagination information.
    */
   export type ISummary = {
+    /** Page information. */
     pagination: IPage.IPagination;
+
+    /** List of records. */
     data: ICommunityPlatformCommunityMembership.ISummary[];
   };
 }

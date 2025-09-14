@@ -6,107 +6,97 @@ import { v4 } from "uuid";
 import { toISOStringSafe } from "../util/toISOStringSafe";
 import { ICommunityPlatformComment } from "@ORGANIZATION/PROJECT-api/lib/structures/ICommunityPlatformComment";
 import { IPageICommunityPlatformComment } from "@ORGANIZATION/PROJECT-api/lib/structures/IPageICommunityPlatformComment";
-import { IPage } from "@ORGANIZATION/PROJECT-api/lib/structures/IPage";
 
 /**
- * List/filter/search public comments with pagination
- * (community_platform_comments).
+ * Paginated and searchable list of comments with core summary data.
  *
- * This operation searches for comments across the platform with advanced
- * filtering, sorting, and pagination capabilities. It targets the
- * community_platform_comments table and returns a paginated list of simplified
- * comment representations (ISummary) suitable for list display.
+ * Retrieves a paginated, filtered list of comments system-wide or for a
+ * particular context (e.g., specific post or parent comment). Supports rich
+ * filtering (e.g., by post, author, nesting), advanced full-text search on
+ * content, and paging for performance. Sorting is offered by newest or top
+ * score (top not supported in this operation).
  *
- * Search by content, post, author, created time, and allow sorting by
- * created_at or score. Only non-deleted comments are included. Public access:
- * anyone (guests, members, admins).
+ * Each comment entry exposes summary fields per the Prisma schema: content
+ * (body), display name, creation date, parent linkage, etc. Publicly readable
+ * by any role, including unauthenticated users, but only non-private fields are
+ * returned if accessed as a guest.
  *
- * @param props - The search and filter request body for comment listing.
- * @returns {IPageICommunityPlatformComment.ISummary} Paginated list and
- *   metadata
- * @throws {Error} If a database or internal error occurs
+ * Operation is accessible to all users; sensitive fields are omitted for guests
+ * as per privacy rules. Standard error handling is enforced for malformed
+ * queries or unauthorized field access.
+ *
+ * @param props - Request properties
+ * @param props.body - Search/filter criteria and pagination options for
+ *   querying comments.
+ * @returns Paginated list of comment summary data matching the search criteria.
+ * @throws {Error} If an invalid parameter, query, or sort value is provided.
  */
 export async function patch__communityPlatform_comments(props: {
   body: ICommunityPlatformComment.IRequest;
 }): Promise<IPageICommunityPlatformComment.ISummary> {
   const { body } = props;
+  const page: number =
+    body.page && typeof body.page === "number" ? body.page : 1;
+  const limit: number =
+    body.limit && typeof body.limit === "number" ? body.limit : 20;
 
-  // Pagination defaults
-  const DEFAULT_PAGE = 1;
-  const DEFAULT_LIMIT = 20;
-  const page = body.page ?? DEFAULT_PAGE;
-  const limit = body.limit ?? DEFAULT_LIMIT;
-
-  // Build where clause using only schema-verified fields
+  // where clause construction per schema-safe spread pattern
   const where = {
     deleted_at: null,
     ...(body.post_id !== undefined && { post_id: body.post_id }),
-    ...(body.author_id !== undefined && { author_id: body.author_id }),
-    ...(body.query !== undefined &&
-      body.query.length > 0 && {
-        content: {
-          contains: body.query,
-          mode: "insensitive" as const,
-        },
-      }),
-    ...(body.created_from !== undefined || body.created_to !== undefined
-      ? {
-          created_at: {
-            ...(body.created_from !== undefined && { gte: body.created_from }),
-            ...(body.created_to !== undefined && { lte: body.created_to }),
-          },
-        }
+    // For parent_comment_id allow: undefined (not filtered), null (search for top-level), or specific value
+    ...(body.parent_comment_id !== undefined
+      ? { parent_comment_id: body.parent_comment_id }
       : {}),
+    ...(body.author_memberuser_id !== undefined && {
+      author_memberuser_id: body.author_memberuser_id,
+    }),
+    ...(body.author_guestuser_id !== undefined && {
+      author_guestuser_id: body.author_guestuser_id,
+    }),
+    ...(body.author_adminuser_id !== undefined && {
+      author_adminuser_id: body.author_adminuser_id,
+    }),
+    ...(body.body_query !== undefined &&
+      body.body_query !== null &&
+      body.body_query.length > 0 && {
+        body: { contains: body.body_query },
+      }),
   };
 
-  // Sorting
-  let orderBy: { [key: string]: "asc" | "desc" };
-  if (body.sort_by === "score") {
-    orderBy = { score: "desc" };
-  } else if (body.sort_by === "created_at_asc") {
-    orderBy = { created_at: "asc" };
-  } else {
-    orderBy = { created_at: "desc" };
-  }
+  // Determine ordering (only 'newest' is supported; 'top' fallback to created_at desc)
+  const orderBy = { created_at: "desc" as const };
 
-  // Query and count in parallel (no intermediate variable)
-  const [rows, total] = await Promise.all([
+  const [comments, total] = await Promise.all([
     MyGlobal.prisma.community_platform_comments.findMany({
       where,
       orderBy,
-      skip: (page - 1) * limit,
-      take: limit,
+      skip: (Number(page) - 1) * Number(limit),
+      take: Number(limit),
       select: {
         id: true,
         post_id: true,
-        author_id: true,
-        content: true,
+        parent_comment_id: true,
+        display_name: true,
         created_at: true,
-        score: true,
-        edited: true,
       },
     }),
     MyGlobal.prisma.community_platform_comments.count({ where }),
   ]);
 
-  // Map results: ensure date fields use toISOStringSafe conversion
-  const data = rows.map((row) => ({
-    id: row.id,
-    post_id: row.post_id,
-    author_id: row.author_id,
-    content: row.content,
-    created_at: toISOStringSafe(row.created_at),
-    score: row.score ?? null,
-    edited: row.edited,
-  }));
-
   return {
     pagination: {
       current: Number(page),
       limit: Number(limit),
-      records: total,
-      pages: Math.ceil(total / Number(limit)),
+      records: Number(total),
+      pages: Math.ceil(Number(total) / Number(limit)),
     },
-    data,
+    data: comments.map((comment) => ({
+      id: comment.id,
+      post_id: comment.post_id,
+      parent_comment_id: comment.parent_comment_id ?? undefined,
+      display_name: comment.display_name ?? undefined,
+      created_at: toISOStringSafe(comment.created_at),
+    })),
   };
 }

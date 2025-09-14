@@ -1,0 +1,195 @@
+/// Defines unauthenticated guest user sessions tracked by the platform for
+/// analytics and traceability. Records represent unique browser/device
+/// interaction without user login. No personal identifying information is
+/// stored. Used for session tracking and conversion analytics. Does not
+/// allow credential linkage. Only referenced by system-side features and
+/// events.
+///
+/// @namespace Actors
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_guestusers {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Timestamp when this guest session was first recorded.
+  created_at DateTime
+  
+  /// Timestamp when this guest session was last active.
+  updated_at DateTime
+  
+  /// Timestamp for soft deletion. Null if active.
+  deleted_at DateTime?
+  
+  /// Opaque string used to link guest records to tracking or legitimate
+  /// metrics. Not a user identifier.
+  session_signature String?
+  
+  //----
+  // RELATIONS
+  //----
+  community_platform_comments community_platform_comments[]
+  community_platform_comment_votes community_platform_comment_votes[]
+  
+  @@unique([session_signature])
+  @@index([created_at])
+  @@index([updated_at])
+}
+
+/// Represents registered and authenticated platform users. Business entity
+/// for content creation, voting, commenting, joining/leaving communities,
+/// and owning posts or comments. Each member user is associated with
+/// credentials (email/password login). May have display name, status, and is
+/// auditable by created/updated timestamps. Linked to posts/comments by
+/// foreign key in other business tables.
+///
+/// @namespace Actors
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_memberusers {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Reference to authenticated credentials {@link
+  /// community_platform_user_credentials.id}. Required for login and password
+  /// resets.
+  user_credential_id String
+  
+  /// Display name visible to others; 0–32 characters allowed. Optional, falls
+  /// back to 'Anonymous'.
+  display_name String?
+  
+  /// Account status for business logic (e.g., active, suspended,
+  /// pending_deletion).
+  status String
+  
+  /// Timestamp when this user account was created.
+  created_at DateTime
+  
+  /// Timestamp when this user account was last modified.
+  updated_at DateTime
+  
+  /// Timestamp for soft deletion, or null if the account is active.
+  deleted_at DateTime?
+  
+  //----
+  // RELATIONS
+  //----
+  credential community_platform_user_credentials @relation(fields: [user_credential_id], references: [id], onDelete: Cascade)
+  
+  community_platform_audit_logs community_platform_audit_logs[]
+  community_platform_sessions community_platform_sessions[]
+  community_platform_communities community_platform_communities[]
+  community_platform_community_memberships community_platform_community_memberships[]
+  community_platform_recent_communities community_platform_recent_communities[]
+  community_platform_posts community_platform_posts[]
+  community_platform_post_votes community_platform_post_votes[]
+  community_platform_comments community_platform_comments[]
+  community_platform_comment_votes community_platform_comment_votes[]
+  community_platform_search_logs community_platform_search_logs[]
+  community_platform_data_export_logs community_platform_data_export_logs[]
+  
+  @@unique([user_credential_id])
+  @@index([display_name])
+  @@index([status])
+}
+
+/// Platform administrators with elevated privileges. Can perform system
+/// moderation tasks, manage communities, delete any content, and change
+/// site-wide configuration. Admin users are managed independently and
+/// require their own credentials. May represent trusted staff or automated
+/// service accounts. Status and audit timestamps apply. Must be created and
+/// managed by other admins. Not convertible from member users.
+///
+/// @namespace Actors
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_adminusers {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Reference to credentials for login/authentication {@link
+  /// community_platform_user_credentials.id}.
+  user_credential_id String
+  
+  /// Admin display name. Optional field for UI display only.
+  display_name String?
+  
+  /// Admin status (e.g., active, suspended, retired).
+  status String
+  
+  /// Timestamp when this admin account was created.
+  created_at DateTime
+  
+  /// Timestamp of most recent admin info update.
+  updated_at DateTime
+  
+  /// Timestamp for soft delete; null if the admin is active.
+  deleted_at DateTime?
+  
+  //----
+  // RELATIONS
+  //----
+  credential community_platform_user_credentials @relation(fields: [user_credential_id], references: [id], onDelete: Cascade)
+  
+  community_platform_audit_logs community_platform_audit_logs[]
+  community_platform_posts community_platform_posts[]
+  community_platform_post_votes community_platform_post_votes[]
+  community_platform_post_moderation_logs community_platform_post_moderation_logs[]
+  community_platform_comments community_platform_comments[]
+  community_platform_comment_votes community_platform_comment_votes[]
+  community_platform_search_logs community_platform_search_logs[]
+  community_platform_data_export_logs community_platform_data_export_logs[]
+  
+  @@unique([user_credential_id])
+  @@index([status])
+}
+
+/// Authentication credential entity for both member and admin users. Stores
+/// securely hashed password, unique email address, and management audit
+/// fields. Audited for login activity and password reset security. Linked
+/// via user_credential_id in member and admin users for 1:1 relationship.
+/// Credentials are never exposed to non-privileged systems. Login
+/// enforcement and user password reset flows enforced via this table.
+///
+/// @namespace Actors
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_user_credentials {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Unique email address for authentication. Case-insensitive match. Used for
+  /// login and password reset flows.
+  email String
+  
+  /// Securely stored hash of user password (bcrypt or Argon2). Never the plain
+  /// text, even to internal logic.
+  password_hash String
+  
+  /// Timestamp when credentials were created. Used for audit trail.
+  created_at DateTime
+  
+  /// Timestamp when credentials were last changed (e.g., password reset).
+  updated_at DateTime
+  
+  /// Timestamp when credentials were deleted/invalidated. Null if still valid.
+  deleted_at DateTime?
+  
+  //----
+  // RELATIONS
+  //----
+  community_platform_memberusers community_platform_memberusers?
+  community_platform_adminusers community_platform_adminusers?
+  
+  @@unique([email])
+  @@index([created_at])
+}

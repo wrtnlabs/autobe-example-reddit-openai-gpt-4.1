@@ -3,12 +3,15 @@ import { ICommunityPlatformComment } from "./ICommunityPlatformComment";
 
 export namespace IPageICommunityPlatformComment {
   /**
-   * Paginated list of summarized comment records. Used for comment search,
-   * feeds, and bulk display operations. Data is an array of
-   * ICommunityPlatformComment.ISummary objects.
+   * A page.
+   *
+   * Collection of records with pagination information.
    */
   export type ISummary = {
+    /** Page information. */
     pagination: IPage.IPagination;
+
+    /** List of records. */
     data: ICommunityPlatformComment.ISummary[];
   };
 }

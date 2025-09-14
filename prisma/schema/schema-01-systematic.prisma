@@ -1,10 +1,8 @@
-/// Master table for community category definitions. This model stores the
-/// allowed set of categories that a sub-community can belong to, such as
-/// 'Tech & Programming', 'Science', etc. Each community must reference a
-/// valid category from this table. Enables system-wide normalization of
-/// category selection and allows for category auditing, restriction, and
-/// business reporting. Frequently referenced by {@link
-/// community_platform_communities}.
+/// Defines allowable sub-community categories across the platform. Each
+/// category is referenced by community creation, enforcing business
+/// constraints and search classification. Name is case-insensitive unique
+/// and immutable after creation. Serves as a lookup for category selectors
+/// throughout the platform.
 ///
 /// @namespace Systematic
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
@@ -13,94 +11,40 @@ model community_platform_categories {
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Unique string code for the category (typically slug form, e.g.,
-  /// 'tech_programming'). Used for programmatic references and API lookups.
-  /// Must be unique.
-  code String
-  
-  /// Human-readable display name for the category (e.g., 'Tech &
-  /// Programming'). Required for display in UI and selection lists.
+  /// Unique name of the category. Used for business logic and search
+  /// classification. Must be case-insensitive unique, 5-32 characters,
+  /// alphanumeric, hyphens and underscores allowed.
   name String
   
-  /// Optional long-form category description (up to 200 characters), for
-  /// tooltips or additional UI context.
+  /// Order for display in lists and UI selectors. Sequential integer starting
+  /// from 1.
+  display_order Int
+  
+  /// Optional description of the category for tooltips or context. Maximum 200
+  /// characters.
   description String?
   
-  /// Timestamp when the category was created.
-  created_at DateTime @db.Timestamptz
+  /// Timestamp when category was created.
+  created_at DateTime
   
-  /// Timestamp when the category was last updated.
-  updated_at DateTime @db.Timestamptz
-  
-  /// Timestamp marking soft deletion of the category. Null if active. Provides
-  /// audit support for category lifecycle.
-  deleted_at DateTime? @db.Timestamptz
+  /// Timestamp when category record was last updated.
+  updated_at DateTime
   
   //----
   // RELATIONS
   //----
   community_platform_communities community_platform_communities[]
   
-  @@unique([code])
   @@unique([name])
-  @@index([created_at])
+  @@index([display_order])
 }
 
-/// System-wide banned words list for content moderation. Each row represents
-/// a single word or phrase that is not permitted in posts, comments,
-/// community names, and other user-generated content. Enables robust
-/// moderation by providing a centrally managed, independently updatable
-/// dictionary outside of main content flows. List is referenced by
-/// moderation engines and can be maintained by trusted moderators/admins.
-///
-/// @namespace Systematic
-/// @author AutoBE - https://github.com/wrtnlabs/autobe
-model community_platform_banned_words {
-  //----
-  // COLUMNS
-  //----
-  /// Primary Key.
-  id String @id @db.Uuid
-  
-  /// Banned word or phrase. Used for case-insensitive content validation and
-  /// moderation sweeps. Must be unique across list.
-  phrase String
-  
-  /// Optional category or severity flag for this phrase (e.g.,
-  /// 'profanity','spam','hate'). Enables fine-grained filtering and reporting.
-  category String?
-  
-  /// Indicates whether the banned word/phrase is currently active and
-  /// enforced. Allows for temporary deactivation without deletion.
-  enabled Boolean
-  
-  /// Timestamp when this banned word/phrase was added to the list.
-  created_at DateTime @db.Timestamptz
-  
-  /// Timestamp when the phrase was last modified (e.g., edit or re-enabled).
-  updated_at DateTime @db.Timestamptz
-  
-  /// Timestamp marking soft deletion/removal from enforcement. Null if still
-  /// active. Supports audit trails for moderation history.
-  deleted_at DateTime? @db.Timestamptz
-  
-  //----
-  // RELATIONS
-  //----
-  @@unique([phrase])
-  @@index([enabled])
-  @@index([category])
-}
-
-/// Centralized storage for system-level configuration parameters and
-/// business logic switches (e.g., toggling maintenance mode, updating UI
-/// settings, adjusting moderation thresholds). This table allows flexible
-/// addition of named configuration entries by administrators, supporting
-/// runtime system adjustments without code deploys. Accessible and
-/// independently managed by trusted admins. May be referenced throughout
-/// business logic for behavioral branching.
+/// Stores global system configuration parameters, feature toggles, and
+/// environment-level settings for the whole platform. Keys must be unique
+/// and are referenced by application server logic. Auditability of changes
+/// is critical (tracked via updated_at).
 ///
 /// @namespace Systematic
 /// @author AutoBE - https://github.com/wrtnlabs/autobe
@@ -109,34 +53,177 @@ model community_platform_configurations {
   // COLUMNS
   //----
   /// Primary Key.
-  id String @id @db.Uuid
+  id String @id
   
-  /// Unique string key representing the configuration parameter (e.g.,
-  /// 'maintenance_mode', 'max_post_length'). All config lookups are based on
-  /// this key. Must be unique.
+  /// Unique key name for the configuration parameter (e.g., 'max_post_length',
+  /// 'enable_voting', etc.).
   key String
   
-  /// The raw configuration value (typically serialized as text, which may be
-  /// JSON, number, string, or feature flag). Must be interpreted at the
-  /// business logic layer per config key type.
+  /// Parameter value as interpreted by application (arbitrary, can be JSON,
+  /// string, or number as string).
   value String
   
-  /// Description of the configuration setting for admin UI/reference.
+  /// Description of what this configuration controls and its effect. Max 200
+  /// chars for admin and logging context.
   description String?
   
-  /// Timestamp when this configuration was created.
-  created_at DateTime @db.Timestamptz
+  /// Timestamp when configuration entry was created.
+  created_at DateTime
   
-  /// Timestamp when the configuration was last updated.
-  updated_at DateTime @db.Timestamptz
-  
-  /// Timestamp marking soft deletion/lifecycle end of the configuration. Null
-  /// if active. Enables auditability for config changes.
-  deleted_at DateTime? @db.Timestamptz
+  /// Timestamp of last update to value or description.
+  updated_at DateTime
   
   //----
   // RELATIONS
   //----
   @@unique([key])
+}
+
+/// Platform-wide audit log covering sensitive actions, admin operations,
+/// configuration changes, login events, and other system-critical
+/// activities. Used for compliance review and security tracking. Logs
+/// reference affected user or admin by id (nullable for system events).
+///
+/// @namespace Systematic
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_audit_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Optional reference to {@link community_platform_memberusers.id} who
+  /// initiated the event, if applicable.
+  actor_memberuser_id String?
+  
+  /// Optional reference to {@link community_platform_adminusers.id} who
+  /// initiated the event, if applicable.
+  actor_adminuser_id String?
+  
+  /// Type of audit event (e.g., 'config_change', 'session_login',
+  /// 'community_delete').
+  event_type String
+  
+  /// Detailed text or JSON describing the event context and any data changed
+  /// (suitable for security review, up to 1000 chars).
+  event_detail String
+  
+  /// Originating IP address (for security tracing, IPv4 or IPv6, may be
+  /// empty/null for automated/system events).
+  ip_address String?
+  
+  /// Timestamp of log event creation. Audit trails require immutable time
+  /// records.
+  created_at DateTime
+  
+  //----
+  // RELATIONS
+  //----
+  actorMemberUser community_platform_memberusers? @relation(fields: [actor_memberuser_id], references: [id], onDelete: Cascade)
+  actorAdminUser community_platform_adminusers? @relation(fields: [actor_adminuser_id], references: [id], onDelete: Cascade)
+  
+  @@index([actor_memberuser_id])
+  @@index([actor_adminuser_id])
+  
+  @@index([created_at])
+  @@index([event_type])
+}
+
+/// Stores all platform-issued JWT or OAuth session tokens and associated
+/// metadata for all users. Each session tracks issue and expiry, IP/device
+/// info, and status. Data is used for login management, concurrent device
+/// enforcement, and forced logout tracing.
+///
+/// @namespace Systematic
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_sessions {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// ID of the user (references any member/admin/guest as appropriate, must be
+  /// found in user tables). Flexible to support all user types.
+  user_id String
+  
+  /// Issued secure session token (not stored in plaintext). Used as reference
+  /// for session retrieval/invalidation. Unique per session.
+  token String
+  
+  /// Session issuance timestamp.
+  issued_at DateTime
+  
+  /// Session expiry timestamp.
+  expires_at DateTime
+  
+  /// Information about the user's device/browser at login (user agent or
+  /// structured JSON string for security analysis).
+  device_info String?
+  
+  /// Login IP address at session creation (for audit/security logic).
+  ip_address String?
+  
+  /// If non-null, session was manually revoked before expiry.
+  revoked_at DateTime?
+  
+  /// Timestamp of session DB record creation.
+  created_at DateTime
+  
+  //----
+  // RELATIONS
+  //----
+  user community_platform_memberusers @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  @@unique([token])
+  @@index([user_id])
+  @@index([issued_at])
+}
+
+/// Administrative registry of authorized third-party API integrations for
+/// the platform, including OAuth providers, webhooks, or external systems
+/// allowed to access or receive events from the platform. Used for
+/// configuration, monitoring, and management of all integrations.
+///
+/// @namespace Systematic
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_external_integrations {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Unique name for this integration (e.g., 'GoogleOAuth', 'SendGrid',
+  /// 'Webhook-Analytics').
+  integration_name String
+  
+  /// Base URL for the third-party integration endpoint.
+  provider_url String?
+  
+  /// Operational status of integration: enabled, disabled, error, pending
+  /// setup.
+  status String
+  
+  /// JSON configuration payload for the integration (credentials, required
+  /// scopes, etc.). Sensitive, restrict access to admins.
+  config_json String
+  
+  /// Timestamp of last confirmed event or handshake from this integration (for
+  /// monitoring health/status).
+  last_successful_sync_at DateTime?
+  
+  /// Timestamp when this integration entry was created.
+  created_at DateTime
+  
+  /// Timestamp of last update to integration details/configuration.
+  updated_at DateTime
+  
+  //----
+  // RELATIONS
+  //----
+  @@unique([integration_name])
+  @@index([status])
   @@index([created_at])
 }

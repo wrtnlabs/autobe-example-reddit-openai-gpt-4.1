@@ -1,0 +1,122 @@
+/// Search action logs for the community platform. Records user and admin
+/// search actions including IP, search query, target scope, and timestamps
+/// for analytics, data export compliance, and trend analysis. Supports
+/// tracking search activity for personalizing experiences and fulfilling
+/// compliance audits like GDPR data searches. Links to member/admin user by
+/// foreign key (may be null—for some anonymous system-level logs), and to IP
+/// address for security monitoring.
+///
+/// @namespace Analytics
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_search_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Performed member user's {@link community_platform_memberusers.id}. May be
+  /// null for non-authenticated or system-driven logs.
+  member_user_id String?
+  
+  /// Performed admin user's {@link community_platform_adminusers.id}. Null
+  /// unless the search was performed by an admin.
+  admin_user_id String?
+  
+  /// The text of the search query issued by the user or admin. Used for
+  /// analytics and service improvement.
+  search_query String
+  
+  /// The logical scope of the search, such as 'posts', 'comments', or
+  /// 'communities'. Used for analytic and UI behavioral breakdowns.
+  target_scope String
+  
+  /// The user or system IP address from which the search was performed. Used
+  /// for audit/security review and geo-distribution analytics.
+  ip_address String
+  
+  /// HTTP user-agent string for device/browser analytics. Helps track
+  /// session/device fingerprints and trends.
+  user_agent String?
+  
+  /// Timestamp when this search log entry was created.
+  created_at DateTime
+  
+  /// Soft-delete timestamp (nullable). Included for compliance with data
+  /// retention/deletion policies.
+  deleted_at DateTime?
+  
+  //----
+  // RELATIONS
+  //----
+  memberUser community_platform_memberusers? @relation(fields: [member_user_id], references: [id], onDelete: Cascade)
+  adminUser community_platform_adminusers? @relation(fields: [admin_user_id], references: [id], onDelete: Cascade)
+  
+  @@index([admin_user_id])
+  
+  @@index([created_at])
+  @@index([ip_address])
+  @@index([member_user_id])
+}
+
+/// Logs system/export data requests for compliance and admin audit. Tracks
+/// when a member or admin requests a downloadable data export (e.g.,
+/// personal data, posts, or community details), including which user/admin
+/// made the request, what type of data was requested, export format, and
+/// time. Useful for legal compliance (GDPR/CCPA) and admin oversight of all
+/// access to large-scale data exports. Links to both member and admin users
+/// (nullable depending on actor), and includes plain fields for event
+/// context.
+///
+/// @namespace Analytics
+/// @author AutoBE - https://github.com/wrtnlabs/autobe
+model community_platform_data_export_logs {
+  //----
+  // COLUMNS
+  //----
+  /// Primary Key.
+  id String @id
+  
+  /// Requesting member user's {@link community_platform_memberusers.id}. May
+  /// be null if export was triggered by admin-only action or on behalf of a
+  /// user by admin.
+  member_user_id String?
+  
+  /// Requesting admin user's {@link community_platform_adminusers.id}. May be
+  /// null if request was performed by a member only.
+  admin_user_id String?
+  
+  /// The nature of the export (e.g., 'user_data', 'community_data', 'posts',
+  /// etc.). Used for compliance tracking and analytics.
+  export_type String
+  
+  /// File format of the export ('json', 'csv', etc.). Used in analytics/audit.
+  export_format String
+  
+  /// IP address from which the export was requested. For audit trail,
+  /// security, and compliance.
+  requested_ip String
+  
+  /// Status of the export request (e.g., 'pending', 'completed', 'failed').
+  /// Used for operational monitoring.
+  status String
+  
+  /// Timestamp when the export request was made.
+  created_at DateTime
+  
+  /// Soft-delete timestamp (nullable). Included for GDPR/policy-driven removal
+  /// or process clean-up.
+  deleted_at DateTime?
+  
+  //----
+  // RELATIONS
+  //----
+  memberUser community_platform_memberusers? @relation(fields: [member_user_id], references: [id], onDelete: Cascade)
+  adminUser community_platform_adminusers? @relation(fields: [admin_user_id], references: [id], onDelete: Cascade)
+  
+  @@index([member_user_id])
+  @@index([admin_user_id])
+  
+  @@index([created_at])
+  @@index([status])
+}

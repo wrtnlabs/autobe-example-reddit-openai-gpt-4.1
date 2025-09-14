@@ -7,47 +7,57 @@ import { toISOStringSafe } from "../util/toISOStringSafe";
 import { ICommunityPlatformCommunity } from "@ORGANIZATION/PROJECT-api/lib/structures/ICommunityPlatformCommunity";
 
 /**
- * Retrieve complete community information and relationships by community ID.
+ * Get full sub-community details by ID (community_platform_communities)
  *
- * Get details about a specific community, including all fields, rule lines,
- * category and owner metadata, and related status. All fields defined in the
- * community_platform_communities schema are included, with linked
- * rules/categorization and display information. Public API for community
- * browsing and view pages. Does not return data for soft-deleted communities to
- * prevent invalid or misleading content being shown; admins may have an
- * override to read deleted state for audits. No private or sensitive data
- * returned to member or public roles.
+ * Retrieves full detail for a specific sub-community by its unique community
+ * ID. Connected to the community_platform_communities table and supports
+ * detailed info requests for community home pages and join/leave flows.
  *
- * @param props - Request properties
- * @param props.communityId - The community record ID to look up
- * @returns The full community entity as defined by ICommunityPlatformCommunity.
- * @throws {Error} When the community is not found or has been soft-deleted
+ * Allows any user to get a detailed record for a sub-community using its ID.
+ * Data returned includes all business-context fields, such as name
+ * (case-insensitive), description, logo/banner URIs, rules, owner, and audit
+ * timestamps. Underlying model is community_platform_communities.
+ *
+ * This data is the source for navigation, info boxes, community home layout,
+ * and join/leave logic. The operation omits deleted communities and any
+ * soft-deleted records.
+ *
+ * Open to all users (public access), with enhanced permissions for
+ * authenticated users when displaying join/leave or edit options.
+ *
+ * @param props - Object containing the communityId parameter
+ * @param props.communityId - Unique identifier for the community record to
+ *   retrieve
+ * @returns Complete, detailed sub-community information for UI and business
+ *   logic
+ * @throws {Error} When the community does not exist or has been soft-deleted
  */
 export async function get__communityPlatform_communities_$communityId(props: {
   communityId: string & tags.Format<"uuid">;
 }): Promise<ICommunityPlatformCommunity> {
   const { communityId } = props;
-
   const community =
-    await MyGlobal.prisma.community_platform_communities.findUnique({
-      where: { id: communityId },
+    await MyGlobal.prisma.community_platform_communities.findFirst({
+      where: {
+        id: communityId,
+        deleted_at: null,
+      },
     });
-
-  if (!community || community.deleted_at) {
-    throw new Error("Community not found or was deleted.");
+  if (!community) {
+    throw new Error("Community not found");
   }
-
   return {
     id: community.id,
-    category_id: community.category_id,
     owner_id: community.owner_id,
+    category_id: community.category_id,
     name: community.name,
-    display_title: community.display_title ?? null,
-    description: community.description ?? null,
-    logo_uri: community.logo_uri ?? null,
-    banner_uri: community.banner_uri ?? null,
+    description: community.description ?? undefined,
+    logo_uri: community.logo_uri ?? undefined,
+    banner_uri: community.banner_uri ?? undefined,
     created_at: toISOStringSafe(community.created_at),
     updated_at: toISOStringSafe(community.updated_at),
-    deleted_at: null,
+    deleted_at: community.deleted_at
+      ? toISOStringSafe(community.deleted_at)
+      : null,
   };
 }

@@ -1,51 +1,22 @@
 import { tags } from "typia";
 
 export namespace IPage {
-  /**
-   * Standard schema describing pagination metadata for page containers.
-   *
-   * Used across all paginated API responses as a required, common component.
-   */
+  /** Page information. */
   export type IPagination = {
-    /**
-     * Current page number of paginated results.
-     *
-     * Reflects the position of the search within the available pages.
-     */
-    current: number &
-      tags.Type<"int32"> &
-      tags.JsonSchemaPlugin<{
-        format: "uint32";
-      }>;
+    /** Current page number. */
+    current: number & tags.Type<"int32"> & tags.Minimum<0>;
+
+    /** Limitation of records per a page. */
+    limit: number & tags.Type<"int32"> & tags.Minimum<0>;
+
+    /** Total records in the database. */
+    records: number & tags.Type<"int32"> & tags.Minimum<0>;
 
     /**
-     * Page size (number of results per page).
+     * Total pages.
      *
-     * Defines pagination window size.
+     * Equal to {@link records} / {@link limit} with ceiling.
      */
-    limit: number &
-      tags.Type<"int32"> &
-      tags.JsonSchemaPlugin<{
-        format: "uint32";
-      }>;
-
-    /** Total number of result records matched by the search/filter. */
-    records: number &
-      tags.Type<"int32"> &
-      tags.JsonSchemaPlugin<{
-        format: "uint32";
-      }>;
-
-    /**
-     * Total number of pages in the result set (computed as records / limit,
-     * rounded up).
-     *
-     * Used for pagination navigation.
-     */
-    pages: number &
-      tags.Type<"int32"> &
-      tags.JsonSchemaPlugin<{
-        format: "uint32";
-      }>;
+    pages: number & tags.Type<"int32"> & tags.Minimum<0>;
   };
 }

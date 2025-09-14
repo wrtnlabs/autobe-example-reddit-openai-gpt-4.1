@@ -1,2 +1,2 @@
-export * as auth from "./auth";
-export * as communityPlatform from "./communityPlatform";
+export * as auth from "./auth/index";
+export * as communityPlatform from "./communityPlatform/index";
